@@ -1,7 +1,8 @@
 //M 100 100 L 300 100 L 200 300 z
 
 use std::error::Error;
-use std::fmt::{Display, self, write};
+use std::fmt::{Display, self};
+use nom::AsChar;
 use nom::multi::{many1, many0};
 use nom::bytes::complete::{take_while, take_while1};
 use nom::combinator::{opt, recognize};
@@ -26,45 +27,147 @@ type EllipticalArcArgument = (Number, Number, Number, Flag, Flag, CoordinatePair
 type EllipticalArcArgumentSequence = Vec<EllipticalArcArgument>;
 type SvgPath = Vec<SvgWord>;
 
+type IsRelative = bool;
 #[derive(Debug)]
 enum SvgWord {
-    MoveTo(CoordinatePairSequence),
-    ClosePath,
-    LineTo(CoordinatePairSequence),
-    HorizontalLineTo(CoordinateSequence),
-    VerticalLineTo(CoordinateSequence),
-    CurveTo(CurveToCoordinateSequence),
-    SmoothCurveTo(SmoothCurveToCoordinateSequence),
-    QuadraticBezierCurveTo(QuadraticBezierCurveToCoordinateSequence),
-    SmoothQuadraticBezierCurveTo(CoordinatePairSequence),
-    EllipticalArc(EllipticalArcArgumentSequence),
+    MoveTo(IsRelative, CoordinatePairSequence),
+    ClosePath(IsRelative),
+    LineTo(IsRelative, CoordinatePairSequence),
+    HorizontalLineTo(IsRelative, CoordinateSequence),
+    VerticalLineTo(IsRelative, CoordinateSequence),
+    CurveTo(IsRelative, CurveToCoordinateSequence),
+    SmoothCurveTo(IsRelative, SmoothCurveToCoordinateSequence),
+    QuadraticBezierCurveTo(IsRelative, QuadraticBezierCurveToCoordinateSequence),
+    SmoothQuadraticBezierCurveTo(IsRelative, CoordinatePairSequence),
+    EllipticalArc(IsRelative, EllipticalArcArgumentSequence),
 }
 
 //TODO Abs/Rel
 //TODO Source letter from method of self
-impl ToString for SvgWord {
-    fn to_string(&self) -> String {
+impl Display for SvgWord {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}{}", self.command_char(), self.command_args_string())
+    }
+}
+
+impl SvgWord {
+    fn command_char(&self) -> char {
         match self {
-            Self::MoveTo(coord_pairs) => format!("M{}", CoordinatePairSequenceStruct(coord_pairs)),
-            Self::ClosePath => format!("Z"),
-            Self::LineTo(coord_pairs) => format!("L{}", CoordinatePairSequenceStruct(coord_pairs)),
-            Self::HorizontalLineTo(coords) => format!("H{}", CoordinateSequenceStruct(coords)),
-            Self::VerticalLineTo(coords) => format!("V{}", CoordinateSequenceStruct(coords)),
-            Self::CurveTo(coord_triplets) => format!("C{}", CurveToCoordinateSequenceStruct(coord_triplets)),
-            Self::SmoothCurveTo(coord_doubles) => format!("S{}", CoordinatePairDoubleSequenceStruct(coord_doubles)),
-            Self::QuadraticBezierCurveTo(coord_doubles) => format!("Q{}", CoordinatePairDoubleSequenceStruct(coord_doubles)),
-            Self::SmoothQuadraticBezierCurveTo(coord_pairs) => format!("T{}", CoordinatePairSequenceStruct(coord_pairs)),
-            Self::EllipticalArc(arc_args) => format!("A{}", EllipticalArcArgumentSequenceStuct(arc_args)),
-        }.to_string()
+            Self::MoveTo(is_rel, _coord_pairs) => letter_abs_rel('M', *is_rel),
+            Self::ClosePath(is_rel) => letter_abs_rel('Z', *is_rel),
+            Self::LineTo(is_rel, _coord_pairs) => letter_abs_rel('L', *is_rel),
+            Self::HorizontalLineTo(is_rel, _coords) => letter_abs_rel('H', *is_rel),
+            Self::VerticalLineTo(is_rel, _coords) => letter_abs_rel('V', *is_rel),
+            Self::CurveTo(is_rel, _coord_triplets) => letter_abs_rel('C', *is_rel),
+            Self::SmoothCurveTo(is_rel, _coord_doubles) => letter_abs_rel('S', *is_rel),
+            Self::QuadraticBezierCurveTo(is_rel, _coord_doubles) => letter_abs_rel('Q', *is_rel),
+            Self::SmoothQuadraticBezierCurveTo(is_rel, _coord_pairs) => letter_abs_rel('T', *is_rel),
+            Self::EllipticalArc(is_rel, _arc_args) => letter_abs_rel('A', *is_rel),
+        }
+    }
+    fn command_args_string(&self) -> String {
+        match self {
+            Self::MoveTo(_is_rel, coord_pairs) => CoordinatePairSequenceStruct(coord_pairs).to_string(),
+            Self::ClosePath(_is_rel) => "".to_string(),
+            Self::LineTo(_is_rel, coord_pairs) => CoordinatePairSequenceStruct(coord_pairs).to_string(),
+            Self::HorizontalLineTo(_is_rel, coords) => CoordinateSequenceStruct(coords).to_string(),
+            Self::VerticalLineTo(_is_rel, coords) => CoordinateSequenceStruct(coords).to_string(),
+            Self::CurveTo(_is_rel, coord_triplets) => CurveToCoordinateSequenceStruct(coord_triplets).to_string(),
+            Self::SmoothCurveTo(_is_rel, coord_doubles) => CoordinatePairDoubleSequenceStruct(coord_doubles).to_string(),
+            Self::QuadraticBezierCurveTo(_is_rel, coord_doubles) => CoordinatePairDoubleSequenceStruct(coord_doubles).to_string(),
+            Self::SmoothQuadraticBezierCurveTo(_is_rel, coord_pairs) => CoordinatePairSequenceStruct(coord_pairs).to_string(),
+            Self::EllipticalArc(_is_rel, arc_args) => EllipticalArcArgumentSequenceStuct(arc_args).to_string(),
+        }
+    }
+}
+
+impl SvgWord {
+    fn scale(&mut self, s: f32) {
+        *self = match self {
+            Self::MoveTo(is_rel, coord_pairs) => {
+                Self::MoveTo(*is_rel, coord_pairs.iter_mut()
+                    .map(|(x, y)| (*x*s, *y*s))
+                    .collect()
+                )
+            },
+            Self::ClosePath(is_rel) => Self::ClosePath(*is_rel),
+            Self::LineTo(is_rel, coord_pairs) => {
+                Self::LineTo(*is_rel, coord_pairs.iter_mut()
+                    .map(|(x, y)| (*x*s, *y*s))
+                    .collect()
+                )
+            },
+            Self::HorizontalLineTo(is_rel, coords) => {
+                Self::HorizontalLineTo(*is_rel, coords.iter_mut()
+                    .map(|x| *x*s)
+                    .collect()
+                )
+            },
+            Self::VerticalLineTo(is_rel, coords) => {
+                Self::VerticalLineTo(*is_rel, coords.iter_mut()
+                    .map(|y| *y*s)
+                    .collect()
+                )
+            },
+            Self::CurveTo(is_rel, coord_triplets) => {
+                Self::CurveTo(*is_rel, coord_triplets.iter_mut()
+                    .map(|((x1, y1), (x2, y2), (x, y))| ((*x1*s, *y1*s), (*x2*s, *y2*s), (*x*s, *y*s)))
+                    .collect()
+                )
+            },
+            Self::SmoothCurveTo(is_rel, coord_doubles) => {
+                Self::SmoothCurveTo(*is_rel, coord_doubles.iter_mut()
+                    .map(|((x2, y2), (x, y))| ((*x2*s, *y2*s), (*x*s, *y*s)))
+                    .collect()
+                )
+            },
+            Self::QuadraticBezierCurveTo(is_rel, coord_doubles) => {
+                Self::QuadraticBezierCurveTo(*is_rel, coord_doubles.iter_mut()
+                    .map(|((x1, y1), (x, y))| ((*x1*s, *y1*s), (*x*s, *y*s)))
+                    .collect()
+                )
+            },
+            Self::SmoothQuadraticBezierCurveTo(is_rel, coord_pairs) => {
+                Self::SmoothQuadraticBezierCurveTo(*is_rel, coord_pairs.iter_mut()
+                    .map(|(x, y)| (*x*s, *y*s))
+                    .collect()
+                )
+            },
+            Self::EllipticalArc(is_rel, arc_args) => {
+                Self::EllipticalArc(*is_rel, arc_args.iter_mut()
+                    .map(|(rx, ry, x_rotation, large_arc, sweep, (x, y))| {
+                        (*rx*s, *ry*s, *x_rotation, *large_arc, *sweep, (*x*s, *y*s))
+                    })
+                    .collect()
+                )
+            },
+        }
+    }
+}
+
+fn letter_abs_rel(c: char, is_rel: bool) -> char {
+    match is_rel {
+        true => c.to_ascii_lowercase(),
+        false => c.to_ascii_uppercase(),
     }
 }
 
 //TODO Rename these structs?
 //TODO Appropriate? Maybe a different trait?
-struct SvgPathStruct<'a>(&'a SvgPath);
-impl ToString for SvgPathStruct<'_> {
-    fn to_string(&self) -> String {
-        self.0.iter().map(|word| word.to_string()).collect()
+struct SvgPathStruct<'a>(&'a mut SvgPath);
+impl Display for SvgPathStruct<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}",
+            self.0.iter().map(|word| word.to_string()).collect::<String>()
+        )
+    }
+}
+
+impl SvgPathStruct<'_> {
+    fn scale(&mut self, s: f32) {
+        for word in self.0.iter_mut() {
+            word.scale(s);
+        }
     }
 }
 
@@ -152,70 +255,64 @@ fn drawto_command(input: &str) -> IResult<&str, SvgWord> {
 
 //TODO Could factor some commands together into a factory
 fn move_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, coord_pairs) = coordinate_pair_sequence_command_factory(|c| c == 'M' || c == 'm', input)?;
-    Ok((input, SvgWord::MoveTo(coord_pairs)))
+    let (input,(c, coord_pairs)) =
+    separated_pair(
+        satisfy(|c| c == 'M' || c == 'm'),
+        take_while(is_wsp),
+        coordinate_pair_sequence,
+    )(input)?;
+    let is_rel = c.is_ascii_lowercase();
+    Ok((input, SvgWord::MoveTo(is_rel, coord_pairs)))
 }
 
 fn line_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, coord_pairs) = coordinate_pair_sequence_command_factory(|c| c == 'L' || c == 'l', input)?;
-    Ok((input, SvgWord::LineTo(coord_pairs)))
+    let (input,(c, coord_pairs)) =
+    separated_pair(
+        satisfy(|c| c == 'L' || c == 'l'),
+        take_while(is_wsp),
+        coordinate_pair_sequence,
+    )(input)?;
+    let is_rel = c.is_ascii_lowercase();
+    Ok((input, SvgWord::LineTo(is_rel, coord_pairs)))
 }
 
 fn close_path(input: &str) -> IResult<&str, SvgWord> {
-    let (input, _) = satisfy(|c| c == 'Z' || c == 'z')(input)?;
-    Ok((input, SvgWord::ClosePath))
+    let (input, c) = satisfy(|c| c == 'Z' || c == 'z')(input)?;
+    let is_rel = c.is_ascii_lowercase();
+    Ok((input, SvgWord::ClosePath(is_rel)))
 }
 
 fn horizontal_line_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, coords) = coordinate_sequence_command_factory(|c| c == 'H' || c == 'h', input)?;
-    Ok((input, SvgWord::HorizontalLineTo(coords)))
+    let (input, (c, coords)) =
+    separated_pair(
+        satisfy(|c| c == 'H' || c == 'h'),
+        take_while(is_wsp),
+        coordinate_sequence,
+    )(input)?;
+    let is_rel = c.is_ascii_lowercase();
+    Ok((input, SvgWord::HorizontalLineTo(is_rel, coords)))
 }
 
 fn vertical_line_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, coords) = coordinate_sequence_command_factory(|c| c == 'V' || c == 'v', input)?;
-    Ok((input, SvgWord::VerticalLineTo(coords)))
-}
-
-fn coordinate_sequence_command_factory(
-    is_cmd: impl Fn(char) -> bool,
-    input: &str
-) -> IResult<&str, CoordinateSequence> {
-    let (input, coords) =
-    preceded(
-        tuple((
-            satisfy(is_cmd),
-            take_while(is_wsp),
-        )),
+    let (input, (c, coords)) =
+    separated_pair(
+        satisfy(|c| c == 'V' || c == 'v'),
+        take_while(is_wsp),
         coordinate_sequence,
     )(input)?;
-    Ok((input, coords))
-}
-
-fn coordinate_pair_sequence_command_factory(
-    is_cmd: impl Fn(char) -> bool,
-    input: &str
-) -> IResult<&str, CoordinatePairSequence> {
-    let (input, coords) =
-    preceded(
-        tuple((
-            satisfy(is_cmd),
-            take_while(is_wsp),
-        )),
-        coordinate_pair_sequence,
-    )(input)?;
-    Ok((input, coords))
+    let is_rel = c.is_ascii_lowercase();
+    Ok((input, SvgWord::VerticalLineTo(is_rel, coords)))
 }
 
 fn curve_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, coords) =
-    preceded(
-        tuple((
-            satisfy(|c| c == 'C' || c == 'c'),
-            take_while(is_wsp),
-        )),
+    let (input, (c, coords)) =
+    separated_pair(
+        satisfy(|c| c == 'C' || c == 'c'),
+        take_while(is_wsp),
         curve_to_coordinate_sequence,
     )(input)?;
-    Ok((input, SvgWord::CurveTo(coords)))
+    let is_rel = c.is_ascii_lowercase();
+    Ok((input, SvgWord::CurveTo(is_rel, coords)))
 }
 
 fn curve_to_coordinate_sequence(input: &str) -> IResult<&str, CurveToCoordinateSequence> {
@@ -225,15 +322,14 @@ fn curve_to_coordinate_sequence(input: &str) -> IResult<&str, CurveToCoordinateS
 }
 
 fn smooth_curve_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, coords) =
-    preceded(
-        tuple((
-            satisfy(|c| c == 'S' || c == 's'),
-            take_while(is_wsp),
-        )),
+    let (input, (c, coords)) =
+    separated_pair(
+        satisfy(|c| c == 'S' || c == 's'),
+        take_while(is_wsp),
         smooth_curve_to_coordinate_sequence,
     )(input)?;
-    Ok((input, SvgWord::SmoothCurveTo(coords)))
+    let is_rel = c.is_ascii_lowercase();
+    Ok((input, SvgWord::SmoothCurveTo(is_rel, coords)))
 }
 
 fn smooth_curve_to_coordinate_sequence(input: &str) -> IResult<&str, SmoothCurveToCoordinateSequence> {
@@ -243,15 +339,14 @@ fn smooth_curve_to_coordinate_sequence(input: &str) -> IResult<&str, SmoothCurve
 }
 
 fn quadratic_bezier_curve_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, coords) =
-    preceded(
-        tuple((
-            satisfy(|c| c == 'Q' || c == 'q'),
-            take_while(is_wsp),
-        )),
+    let (input, (c, coords)) =
+    separated_pair(
+        satisfy(|c| c == 'Q' || c == 'q'),
+        take_while(is_wsp),
         quadratic_bezier_curve_to_coordinate_sequence,
     )(input)?;
-    Ok((input, SvgWord::QuadraticBezierCurveTo(coords)))
+    let is_rel = c.is_ascii_lowercase();
+    Ok((input, SvgWord::QuadraticBezierCurveTo(is_rel, coords)))
 }
 
 fn quadratic_bezier_curve_to_coordinate_sequence(input: &str) -> IResult<&str, QuadraticBezierCurveToCoordinateSequence> {
@@ -261,15 +356,14 @@ fn quadratic_bezier_curve_to_coordinate_sequence(input: &str) -> IResult<&str, Q
 }
 
 fn smooth_quadratic_bezier_curve_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, coords) =
-    preceded(
-        tuple((
-            satisfy(|c| c == 'T' || c == 't'),
-            take_while(is_wsp),
-        )),
+    let (input, (c, coords)) =
+    separated_pair(
+        satisfy(|c| c == 'T' || c == 't'),
+        take_while(is_wsp),
         coordinate_pair_sequence,
     )(input)?;
-    Ok((input, SvgWord::SmoothQuadraticBezierCurveTo(coords)))
+    let is_rel = c.is_ascii_lowercase();
+    Ok((input, SvgWord::SmoothQuadraticBezierCurveTo(is_rel, coords)))
 }
 
 fn elliptical_arc_argument(input: &str) -> IResult<&str, EllipticalArcArgument> {
@@ -290,15 +384,14 @@ fn elliptical_arc_argument_sequence(input: &str) -> IResult<&str, EllipticalArcA
 }
 
 fn elliptical_arc(input: &str) -> IResult<&str, SvgWord> {
-    let (input, args) =
-    preceded(
-        tuple((
-            satisfy(|c| c == 'A' || c == 'a'),
-            take_while(is_wsp),
-        )),
+    let (input, (c, args)) =
+    separated_pair(
+        satisfy(|c| c == 'A' || c == 'a'),
+        take_while(is_wsp),
         elliptical_arc_argument_sequence,
     )(input)?;
-    Ok((input, SvgWord::EllipticalArc(args)))
+    let is_rel = c.is_ascii_lowercase();
+    Ok((input, SvgWord::EllipticalArc(is_rel, args)))
 }
 
 fn flag(input: &str) -> IResult<&str, bool> {
@@ -389,17 +482,15 @@ fn is_flag(c: char) -> bool {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-
-    let path = "M140 20C73 20 20 74 20 140c0 135 136 170 228 303 88-132 229-173 229-303 0-66-54-120-120-120-48 0-90 28-109 69-19-41-60-69-108-69z";
+    let path = "M -23.69,-49.89 C -38.31,-49.89 -49.89,-37.14 -49.89,-21.57 C -49.89,10.32 -20.2,18.56 -0.1065,50 C 19.11,18.8 49.9,9.144 49.9,-21.57 C 49.9,-37.14 38.1,-49.89 23.69,-49.89 C 13.21,-49.89 4.044,-43.28 -0.1065,-33.6 C -4.256,-43.28 -13.21,-49.89 -23.69,-49.89 Z";
     println!("Original path:\n\t{path}");
 
 
-    let (_remaining, path) = svg_path(path)?;
-    //dbg!(remaining);
-    //dbg!(&path);
+    let (_remaining, mut path) = svg_path(path)?;
+    let mut path = SvgPathStruct(&mut path);
+    path.scale(2.0);
 
-//    println!("As new path:\n\t{}", SvgPath_to_string(&path));
-    println!("As new path:\n\t{}", SvgPathStruct(&path).to_string());
+    println!("As new path:\n\t{}", path);
 
     Ok(())
 
