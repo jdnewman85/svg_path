@@ -1,6 +1,7 @@
 //M 100 100 L 300 100 L 200 300 z
 
 use std::error::Error;
+use std::fmt::{Display, self, write};
 use nom::multi::{many1, many0};
 use nom::bytes::complete::{take_while, take_while1};
 use nom::combinator::{opt, recognize};
@@ -16,13 +17,15 @@ type CoordinateSequence = Vec<Number>;
 type CoordinatePairSequence = Vec<CoordinatePair>;
 type CoordinatePairDouble = (CoordinatePair, CoordinatePair);
 type CoordinatePairTriplet = (CoordinatePair, CoordinatePair, CoordinatePair);
+type CoordinatePairDoubleSequence = Vec<CoordinatePairDouble>;
 type CurveToCoordinateSequence = Vec<CoordinatePairTriplet>;
-type SmoothCurveToCoordinateSequence = Vec<CoordinatePairDouble>;
-type QuadraticBezierCurveToCoordinateSequence = Vec<CoordinatePairDouble>;
+type SmoothCurveToCoordinateSequence = CoordinatePairDoubleSequence;
+type QuadraticBezierCurveToCoordinateSequence = CoordinatePairDoubleSequence;
 type Flag = bool;
 type EllipticalArcArgument = (Number, Number, Number, Flag, Flag, CoordinatePair);
 type EllipticalArcArgumentSequence = Vec<EllipticalArcArgument>;
 type SvgPath = Vec<SvgWord>;
+
 #[derive(Debug)]
 enum SvgWord {
     MoveTo(CoordinatePairSequence),
@@ -35,6 +38,93 @@ enum SvgWord {
     QuadraticBezierCurveTo(QuadraticBezierCurveToCoordinateSequence),
     SmoothQuadraticBezierCurveTo(CoordinatePairSequence),
     EllipticalArc(EllipticalArcArgumentSequence),
+}
+
+//TODO Abs/Rel
+//TODO Source letter from method of self
+impl ToString for SvgWord {
+    fn to_string(&self) -> String {
+        match self {
+            Self::MoveTo(coord_pairs) => format!("M{}", CoordinatePairSequenceStruct(coord_pairs)),
+            Self::ClosePath => format!("Z"),
+            Self::LineTo(coord_pairs) => format!("L{}", CoordinatePairSequenceStruct(coord_pairs)),
+            Self::HorizontalLineTo(coords) => format!("H{}", CoordinateSequenceStruct(coords)),
+            Self::VerticalLineTo(coords) => format!("V{}", CoordinateSequenceStruct(coords)),
+            Self::CurveTo(coord_triplets) => format!("C{}", CurveToCoordinateSequenceStruct(coord_triplets)),
+            Self::SmoothCurveTo(coord_doubles) => format!("S{}", CoordinatePairDoubleSequenceStruct(coord_doubles)),
+            Self::QuadraticBezierCurveTo(coord_doubles) => format!("Q{}", CoordinatePairDoubleSequenceStruct(coord_doubles)),
+            Self::SmoothQuadraticBezierCurveTo(coord_pairs) => format!("T{}", CoordinatePairSequenceStruct(coord_pairs)),
+            Self::EllipticalArc(arc_args) => format!("A{}", EllipticalArcArgumentSequenceStuct(arc_args)),
+        }.to_string()
+    }
+}
+
+//TODO Rename these structs?
+//TODO Appropriate? Maybe a different trait?
+struct SvgPathStruct<'a>(&'a SvgPath);
+impl ToString for SvgPathStruct<'_> {
+    fn to_string(&self) -> String {
+        self.0.iter().map(|word| word.to_string()).collect()
+    }
+}
+
+struct CoordinatePairSequenceStruct<'a>(&'a CoordinatePairSequence);
+impl Display for CoordinatePairSequenceStruct<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}",
+            self.0.iter()
+                .map(|(x, y)| format!("{x},{y}"))
+                .collect::<Vec<_>>().join(" ")
+        )
+    }
+}
+
+struct CoordinateSequenceStruct<'a>(&'a CoordinateSequence);
+impl Display for CoordinateSequenceStruct<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}",
+            self.0.iter()
+                .map(|c| format!("{c}"))
+                .collect::<Vec<_>>().join(" ")
+        )
+    }
+}
+
+struct CurveToCoordinateSequenceStruct<'a>(&'a CurveToCoordinateSequence);
+impl Display for CurveToCoordinateSequenceStruct<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}",
+            self.0.iter()
+                .map(|((x1, y1), (x2, y2), (x, y))| format!("{x1},{y1} {x2},{y2} {x},{y}"))
+                .collect::<Vec<_>>().join(" ")
+        )
+    }
+}
+
+struct CoordinatePairDoubleSequenceStruct<'a>(&'a CoordinatePairDoubleSequence);
+impl Display for CoordinatePairDoubleSequenceStruct<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}",
+            self.0.iter()
+                .map(|((x1, y1), (x, y))| format!("{x1},{y1} {x},{y}"))
+                .collect::<Vec<_>>().join(" ")
+        )
+    }
+}
+
+struct EllipticalArcArgumentSequenceStuct<'a>(&'a EllipticalArcArgumentSequence);
+impl Display for EllipticalArcArgumentSequenceStuct<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}",
+            self.0.iter()
+                .map(|(rx, ry, x_rotation, large_arc, sweep, (x, y))| {
+                    let large_arc = *large_arc as i32;
+                    let sweep = *sweep as i32;
+                    format!("{rx},{ry} {x_rotation} {large_arc} {sweep} {x},{y}")
+                })
+                .collect::<Vec<_>>().join(" ")
+        )
+    }
 }
 
 //TODO Make "correct", or have alternative correct version
@@ -299,13 +389,17 @@ fn is_flag(c: char) -> bool {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    println!("Hi");
 
     let path = "M140 20C73 20 20 74 20 140c0 135 136 170 228 303 88-132 229-173 229-303 0-66-54-120-120-120-48 0-90 28-109 69-19-41-60-69-108-69z";
-    let (remaining, path) = svg_path(path)?;
+    println!("Original path:\n\t{path}");
 
-    dbg!(remaining);
-    dbg!(path);
+
+    let (_remaining, path) = svg_path(path)?;
+    //dbg!(remaining);
+    //dbg!(&path);
+
+//    println!("As new path:\n\t{}", SvgPath_to_string(&path));
+    println!("As new path:\n\t{}", SvgPathStruct(&path).to_string());
 
     Ok(())
 
