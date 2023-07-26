@@ -253,27 +253,27 @@ fn drawto_command(input: &str) -> IResult<&str, SvgWord> {
     ))(input)
 }
 
-//TODO Could factor some commands together into a factory
-fn move_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input,(c, coord_pairs)) =
+fn svg_word<O>(input: &str, cmd_letter: char, arg_parser: fn(&str)->IResult<&str, O>) -> IResult<&str, (bool, O)> {
+    let (input, (c, coords)) =
     separated_pair(
-        satisfy(|c| c == 'M' || c == 'm'),
+        satisfy(|c| c.to_ascii_uppercase() == cmd_letter),
         take_while(is_wsp),
-        coordinate_pair_sequence,
+        arg_parser,
     )(input)?;
     let is_rel = c.is_ascii_lowercase();
-    Ok((input, SvgWord::MoveTo(is_rel, coord_pairs)))
+    Ok((input,(is_rel, coords)))
+}
+
+
+//TODO Could factor some commands together into a factory
+fn move_to(input: &str) -> IResult<&str, SvgWord> {
+    let (input, (is_rel, args)) = svg_word(input, 'M', coordinate_pair_sequence)?;
+    Ok((input, SvgWord::MoveTo(is_rel, args)))
 }
 
 fn line_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input,(c, coord_pairs)) =
-    separated_pair(
-        satisfy(|c| c == 'L' || c == 'l'),
-        take_while(is_wsp),
-        coordinate_pair_sequence,
-    )(input)?;
-    let is_rel = c.is_ascii_lowercase();
-    Ok((input, SvgWord::LineTo(is_rel, coord_pairs)))
+    let (input, (is_rel, args)) = svg_word(input, 'L', coordinate_pair_sequence)?;
+    Ok((input, SvgWord::LineTo(is_rel, args)))
 }
 
 fn close_path(input: &str) -> IResult<&str, SvgWord> {
@@ -283,36 +283,18 @@ fn close_path(input: &str) -> IResult<&str, SvgWord> {
 }
 
 fn horizontal_line_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (c, coords)) =
-    separated_pair(
-        satisfy(|c| c == 'H' || c == 'h'),
-        take_while(is_wsp),
-        coordinate_sequence,
-    )(input)?;
-    let is_rel = c.is_ascii_lowercase();
-    Ok((input, SvgWord::HorizontalLineTo(is_rel, coords)))
+    let (input, (is_rel, args)) = svg_word(input, 'H', coordinate_sequence)?;
+    Ok((input, SvgWord::HorizontalLineTo(is_rel, args)))
 }
 
 fn vertical_line_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (c, coords)) =
-    separated_pair(
-        satisfy(|c| c == 'V' || c == 'v'),
-        take_while(is_wsp),
-        coordinate_sequence,
-    )(input)?;
-    let is_rel = c.is_ascii_lowercase();
-    Ok((input, SvgWord::VerticalLineTo(is_rel, coords)))
+    let (input, (is_rel, args)) = svg_word(input, 'V', coordinate_sequence)?;
+    Ok((input, SvgWord::VerticalLineTo(is_rel, args)))
 }
 
 fn curve_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (c, coords)) =
-    separated_pair(
-        satisfy(|c| c == 'C' || c == 'c'),
-        take_while(is_wsp),
-        curve_to_coordinate_sequence,
-    )(input)?;
-    let is_rel = c.is_ascii_lowercase();
-    Ok((input, SvgWord::CurveTo(is_rel, coords)))
+    let (input, (is_rel, args)) = svg_word(input, 'C', curve_to_coordinate_sequence)?;
+    Ok((input, SvgWord::CurveTo(is_rel, args)))
 }
 
 fn curve_to_coordinate_sequence(input: &str) -> IResult<&str, CurveToCoordinateSequence> {
@@ -322,48 +304,36 @@ fn curve_to_coordinate_sequence(input: &str) -> IResult<&str, CurveToCoordinateS
 }
 
 fn smooth_curve_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (c, coords)) =
-    separated_pair(
-        satisfy(|c| c == 'S' || c == 's'),
-        take_while(is_wsp),
-        smooth_curve_to_coordinate_sequence,
-    )(input)?;
-    let is_rel = c.is_ascii_lowercase();
-    Ok((input, SvgWord::SmoothCurveTo(is_rel, coords)))
+    let (input, (is_rel, args)) = svg_word(input, 'S', smooth_curve_to_coordinate_sequence)?;
+    Ok((input, SvgWord::SmoothCurveTo(is_rel, args)))
 }
 
 fn smooth_curve_to_coordinate_sequence(input: &str) -> IResult<&str, SmoothCurveToCoordinateSequence> {
     many1(
-        terminated(coordinate_pair_double, opt(comma_wsp))
+        terminated(
+            coordinate_pair_double,
+            opt(comma_wsp)
+        )
     )(input)
 }
 
 fn quadratic_bezier_curve_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (c, coords)) =
-    separated_pair(
-        satisfy(|c| c == 'Q' || c == 'q'),
-        take_while(is_wsp),
-        quadratic_bezier_curve_to_coordinate_sequence,
-    )(input)?;
-    let is_rel = c.is_ascii_lowercase();
-    Ok((input, SvgWord::QuadraticBezierCurveTo(is_rel, coords)))
+    let (input, (is_rel, args)) = svg_word(input, 'Q', quadratic_bezier_curve_to_coordinate_sequence)?;
+    Ok((input, SvgWord::QuadraticBezierCurveTo(is_rel, args)))
 }
 
 fn quadratic_bezier_curve_to_coordinate_sequence(input: &str) -> IResult<&str, QuadraticBezierCurveToCoordinateSequence> {
     many1(
-        terminated(coordinate_pair_double, opt(comma_wsp))
+        terminated(
+            coordinate_pair_double,
+            opt(comma_wsp)
+        )
     )(input)
 }
 
 fn smooth_quadratic_bezier_curve_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (c, coords)) =
-    separated_pair(
-        satisfy(|c| c == 'T' || c == 't'),
-        take_while(is_wsp),
-        coordinate_pair_sequence,
-    )(input)?;
-    let is_rel = c.is_ascii_lowercase();
-    Ok((input, SvgWord::SmoothQuadraticBezierCurveTo(is_rel, coords)))
+    let (input, (is_rel, args)) = svg_word(input, 'T', coordinate_pair_sequence)?;
+    Ok((input, SvgWord::SmoothQuadraticBezierCurveTo(is_rel, args)))
 }
 
 fn elliptical_arc_argument(input: &str) -> IResult<&str, EllipticalArcArgument> {
@@ -384,13 +354,7 @@ fn elliptical_arc_argument_sequence(input: &str) -> IResult<&str, EllipticalArcA
 }
 
 fn elliptical_arc(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (c, args)) =
-    separated_pair(
-        satisfy(|c| c == 'A' || c == 'a'),
-        take_while(is_wsp),
-        elliptical_arc_argument_sequence,
-    )(input)?;
-    let is_rel = c.is_ascii_lowercase();
+    let (input, (is_rel, args)) = svg_word(input, 'A', elliptical_arc_argument_sequence)?;
     Ok((input, SvgWord::EllipticalArc(is_rel, args)))
 }
 
