@@ -2,7 +2,6 @@
 
 use std::error::Error;
 use std::fmt::{Display, self};
-use nom::AsChar;
 use nom::multi::{many1, many0};
 use nom::bytes::complete::{take_while, take_while1};
 use nom::combinator::{opt, recognize};
@@ -82,65 +81,59 @@ impl SvgWord {
 }
 
 impl SvgWord {
+    //TODO Replace with vec#s and .scale() calls to those
     fn scale(&mut self, s: f32) {
-        *self = match self {
-            Self::MoveTo(is_rel, coord_pairs) => {
-                Self::MoveTo(*is_rel, coord_pairs.iter_mut()
-                    .map(|(x, y)| (*x*s, *y*s))
-                    .collect()
-                )
-            },
-            Self::ClosePath(is_rel) => Self::ClosePath(*is_rel),
-            Self::LineTo(is_rel, coord_pairs) => {
-                Self::LineTo(*is_rel, coord_pairs.iter_mut()
-                    .map(|(x, y)| (*x*s, *y*s))
-                    .collect()
-                )
-            },
-            Self::HorizontalLineTo(is_rel, coords) => {
-                Self::HorizontalLineTo(*is_rel, coords.iter_mut()
-                    .map(|x| *x*s)
-                    .collect()
-                )
-            },
-            Self::VerticalLineTo(is_rel, coords) => {
-                Self::VerticalLineTo(*is_rel, coords.iter_mut()
-                    .map(|y| *y*s)
-                    .collect()
-                )
-            },
-            Self::CurveTo(is_rel, coord_triplets) => {
-                Self::CurveTo(*is_rel, coord_triplets.iter_mut()
-                    .map(|((x1, y1), (x2, y2), (x, y))| ((*x1*s, *y1*s), (*x2*s, *y2*s), (*x*s, *y*s)))
-                    .collect()
-                )
-            },
-            Self::SmoothCurveTo(is_rel, coord_doubles) => {
-                Self::SmoothCurveTo(*is_rel, coord_doubles.iter_mut()
-                    .map(|((x2, y2), (x, y))| ((*x2*s, *y2*s), (*x*s, *y*s)))
-                    .collect()
-                )
-            },
-            Self::QuadraticBezierCurveTo(is_rel, coord_doubles) => {
-                Self::QuadraticBezierCurveTo(*is_rel, coord_doubles.iter_mut()
-                    .map(|((x1, y1), (x, y))| ((*x1*s, *y1*s), (*x*s, *y*s)))
-                    .collect()
-                )
-            },
-            Self::SmoothQuadraticBezierCurveTo(is_rel, coord_pairs) => {
-                Self::SmoothQuadraticBezierCurveTo(*is_rel, coord_pairs.iter_mut()
-                    .map(|(x, y)| (*x*s, *y*s))
-                    .collect()
-                )
-            },
-            Self::EllipticalArc(is_rel, arc_args) => {
-                Self::EllipticalArc(*is_rel, arc_args.iter_mut()
-                    .map(|(rx, ry, x_rotation, large_arc, sweep, (x, y))| {
-                        (*rx*s, *ry*s, *x_rotation, *large_arc, *sweep, (*x*s, *y*s))
-                    })
-                    .collect()
-                )
-            },
+        match self {
+            Self::MoveTo(_is_rel, coord_pairs) =>
+                coord_pairs.iter_mut().for_each(|(x, y)| {
+                    *x *= s;
+                    *y *= s;
+                }),
+            Self::ClosePath(_is_rel) => {},
+            Self::LineTo(_is_rel, coord_pairs) =>
+                coord_pairs.iter_mut().for_each(|(x, y)| {
+                    *x *= s;
+                    *y *= s;
+                }),
+            Self::HorizontalLineTo(_is_rel, coords) =>
+                coords.iter_mut().for_each(|x| *x *= s),
+            Self::VerticalLineTo(_is_rel, coords) =>
+                coords.iter_mut().for_each(|y| *y *= s),
+            Self::CurveTo(_is_rel, coord_triplets) =>
+                coord_triplets.iter_mut().for_each(|((x1, y1), (x2, y2), (x, y))| {
+                    *x1 *= s;
+                    *y1 *= s;
+                    *x2 *= s;
+                    *y2 *= s;
+                     *x *= s;
+                     *y *= s;
+                }),
+            Self::SmoothCurveTo(_is_rel, coord_doubles) =>
+                coord_doubles.iter_mut().for_each(|((x2, y2), (x, y))| {
+                    *x2 *= s;
+                    *y2 *= s;
+                     *x *= s;
+                     *y *= s;
+                }),
+            Self::QuadraticBezierCurveTo(_is_rel, coord_doubles) =>
+                coord_doubles.iter_mut().for_each(|((x1, y1), (x, y))| {
+                    *x1 *= s;
+                    *y1 *= s;
+                     *x *= s;
+                     *y *= s;
+                }),
+            Self::SmoothQuadraticBezierCurveTo(_is_rel, coord_pairs) =>
+                coord_pairs.iter_mut().for_each(|(x, y)| {
+                    *x *= s;
+                    *y *= s;
+                }),
+            Self::EllipticalArc(_is_rel, arc_args) =>
+                arc_args.iter_mut().for_each(|(rx, ry, _x_rotation, _large_arc, _sweep, (x, y))| {
+                    *rx *= s;
+                    *ry *= s;
+                     *x *= s;
+                     *y *= s;
+                }),
         }
     }
 }
