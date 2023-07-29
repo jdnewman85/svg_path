@@ -1,3 +1,5 @@
+Define Vec types so that I can call scale on them?
+
 Need to center path before scaling, then move back
 Centering path requires knowing bounds of curves....
 

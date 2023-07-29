@@ -26,23 +26,25 @@ type EllipticalArcArgument = (Number, Number, Number, Flag, Flag, CoordinatePair
 type EllipticalArcArgumentSequence = Vec<EllipticalArcArgument>;
 type SvgPath = Vec<SvgWord>;
 
-type IsRelative = bool;
 #[derive(Debug)]
-enum SvgWord {
-    MoveTo(IsRelative, CoordinatePairSequence),
-    ClosePath(IsRelative),
-    LineTo(IsRelative, CoordinatePairSequence),
-    HorizontalLineTo(IsRelative, CoordinateSequence),
-    VerticalLineTo(IsRelative, CoordinateSequence),
-    CurveTo(IsRelative, CurveToCoordinateSequence),
-    SmoothCurveTo(IsRelative, SmoothCurveToCoordinateSequence),
-    QuadraticBezierCurveTo(IsRelative, QuadraticBezierCurveToCoordinateSequence),
-    SmoothQuadraticBezierCurveTo(IsRelative, CoordinatePairSequence),
-    EllipticalArc(IsRelative, EllipticalArcArgumentSequence),
+enum SvgWordKind {
+    MoveTo(CoordinatePairSequence),
+    ClosePath,
+    LineTo(CoordinatePairSequence),
+    HorizontalLineTo(CoordinateSequence),
+    VerticalLineTo(CoordinateSequence),
+    CurveTo(CurveToCoordinateSequence),
+    SmoothCurveTo(SmoothCurveToCoordinateSequence),
+    QuadraticBezierCurveTo(QuadraticBezierCurveToCoordinateSequence),
+    SmoothQuadraticBezierCurveTo(CoordinatePairSequence),
+    EllipticalArc(EllipticalArcArgumentSequence),
 }
 
-//TODO Abs/Rel
-//TODO Source letter from method of self
+struct SvgWord {
+    is_relative: bool,
+    word: SvgWordKind,
+}
+
 impl Display for SvgWord {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}{}", self.command_char(), self.command_args_string())
@@ -50,32 +52,41 @@ impl Display for SvgWord {
 }
 
 impl SvgWord {
+    fn command_char_abs(&self) -> char {
+        match self.word {
+            SvgWordKind::MoveTo(_) => 'M',
+            SvgWordKind::ClosePath => 'Z',
+            SvgWordKind::LineTo(_) => 'L',
+            SvgWordKind::HorizontalLineTo(_) => 'H',
+            SvgWordKind::VerticalLineTo(_) => 'V',
+            SvgWordKind::CurveTo(_) => 'C',
+            SvgWordKind::SmoothCurveTo(_) => 'S',
+            SvgWordKind::QuadraticBezierCurveTo(_) => 'Q',
+            SvgWordKind::SmoothQuadraticBezierCurveTo(_) => 'T',
+            SvgWordKind::EllipticalArc(_) => 'A',
+        }
+    }
+    fn command_char_rel(&self) -> char {
+        self.command_char_abs().to_ascii_lowercase()
+    }
     fn command_char(&self) -> char {
-        match self {
-            Self::MoveTo(is_rel, _coord_pairs) => letter_abs_rel('M', *is_rel),
-            Self::ClosePath(is_rel) => letter_abs_rel('Z', *is_rel),
-            Self::LineTo(is_rel, _coord_pairs) => letter_abs_rel('L', *is_rel),
-            Self::HorizontalLineTo(is_rel, _coords) => letter_abs_rel('H', *is_rel),
-            Self::VerticalLineTo(is_rel, _coords) => letter_abs_rel('V', *is_rel),
-            Self::CurveTo(is_rel, _coord_triplets) => letter_abs_rel('C', *is_rel),
-            Self::SmoothCurveTo(is_rel, _coord_doubles) => letter_abs_rel('S', *is_rel),
-            Self::QuadraticBezierCurveTo(is_rel, _coord_doubles) => letter_abs_rel('Q', *is_rel),
-            Self::SmoothQuadraticBezierCurveTo(is_rel, _coord_pairs) => letter_abs_rel('T', *is_rel),
-            Self::EllipticalArc(is_rel, _arc_args) => letter_abs_rel('A', *is_rel),
+        match self.is_relative {
+            true => self.command_char_rel(),
+            false => self.command_char_abs(),
         }
     }
     fn command_args_string(&self) -> String {
-        match self {
-            Self::MoveTo(_is_rel, coord_pairs) => CoordinatePairSequenceStruct(coord_pairs).to_string(),
-            Self::ClosePath(_is_rel) => "".to_string(),
-            Self::LineTo(_is_rel, coord_pairs) => CoordinatePairSequenceStruct(coord_pairs).to_string(),
-            Self::HorizontalLineTo(_is_rel, coords) => CoordinateSequenceStruct(coords).to_string(),
-            Self::VerticalLineTo(_is_rel, coords) => CoordinateSequenceStruct(coords).to_string(),
-            Self::CurveTo(_is_rel, coord_triplets) => CurveToCoordinateSequenceStruct(coord_triplets).to_string(),
-            Self::SmoothCurveTo(_is_rel, coord_doubles) => CoordinatePairDoubleSequenceStruct(coord_doubles).to_string(),
-            Self::QuadraticBezierCurveTo(_is_rel, coord_doubles) => CoordinatePairDoubleSequenceStruct(coord_doubles).to_string(),
-            Self::SmoothQuadraticBezierCurveTo(_is_rel, coord_pairs) => CoordinatePairSequenceStruct(coord_pairs).to_string(),
-            Self::EllipticalArc(_is_rel, arc_args) => EllipticalArcArgumentSequenceStuct(arc_args).to_string(),
+        match &self.word {
+            SvgWordKind::MoveTo(coord_pairs) => CoordinatePairSequenceStruct(&coord_pairs).to_string(),
+            SvgWordKind::ClosePath => "".to_string(),
+            SvgWordKind::LineTo(coord_pairs) => CoordinatePairSequenceStruct(&coord_pairs).to_string(),
+            SvgWordKind::HorizontalLineTo(coords) => CoordinateSequenceStruct(&coords).to_string(),
+            SvgWordKind::VerticalLineTo(coords) => CoordinateSequenceStruct(&coords).to_string(),
+            SvgWordKind::CurveTo(coord_triplets) => CurveToCoordinateSequenceStruct(&coord_triplets).to_string(),
+            SvgWordKind::SmoothCurveTo(coord_doubles) => CoordinatePairDoubleSequenceStruct(&coord_doubles).to_string(),
+            SvgWordKind::QuadraticBezierCurveTo(coord_doubles) => CoordinatePairDoubleSequenceStruct(&coord_doubles).to_string(),
+            SvgWordKind::SmoothQuadraticBezierCurveTo(coord_pairs) => CoordinatePairSequenceStruct(&coord_pairs).to_string(),
+            SvgWordKind::EllipticalArc(arc_args) => EllipticalArcArgumentSequenceStuct(&arc_args).to_string(),
         }
     }
 }
@@ -83,23 +94,23 @@ impl SvgWord {
 impl SvgWord {
     //TODO Replace with vec#s and .scale() calls to those
     fn scale(&mut self, s: f32) {
-        match self {
-            Self::MoveTo(_is_rel, coord_pairs) =>
+        match &mut self.word {
+            SvgWordKind::MoveTo(ref mut coord_pairs) =>
                 coord_pairs.iter_mut().for_each(|(x, y)| {
                     *x *= s;
                     *y *= s;
                 }),
-            Self::ClosePath(_is_rel) => {},
-            Self::LineTo(_is_rel, coord_pairs) =>
+            SvgWordKind::ClosePath => {},
+            SvgWordKind::LineTo(ref mut coord_pairs) =>
                 coord_pairs.iter_mut().for_each(|(x, y)| {
                     *x *= s;
                     *y *= s;
                 }),
-            Self::HorizontalLineTo(_is_rel, coords) =>
+            SvgWordKind::HorizontalLineTo(ref mut coords) =>
                 coords.iter_mut().for_each(|x| *x *= s),
-            Self::VerticalLineTo(_is_rel, coords) =>
+            SvgWordKind::VerticalLineTo(ref mut coords) =>
                 coords.iter_mut().for_each(|y| *y *= s),
-            Self::CurveTo(_is_rel, coord_triplets) =>
+            SvgWordKind::CurveTo(ref mut coord_triplets) =>
                 coord_triplets.iter_mut().for_each(|((x1, y1), (x2, y2), (x, y))| {
                     *x1 *= s;
                     *y1 *= s;
@@ -108,26 +119,26 @@ impl SvgWord {
                      *x *= s;
                      *y *= s;
                 }),
-            Self::SmoothCurveTo(_is_rel, coord_doubles) =>
+            SvgWordKind::SmoothCurveTo(ref mut coord_doubles) =>
                 coord_doubles.iter_mut().for_each(|((x2, y2), (x, y))| {
                     *x2 *= s;
                     *y2 *= s;
                      *x *= s;
                      *y *= s;
                 }),
-            Self::QuadraticBezierCurveTo(_is_rel, coord_doubles) =>
+            SvgWordKind::QuadraticBezierCurveTo(ref mut coord_doubles) =>
                 coord_doubles.iter_mut().for_each(|((x1, y1), (x, y))| {
                     *x1 *= s;
                     *y1 *= s;
                      *x *= s;
                      *y *= s;
                 }),
-            Self::SmoothQuadraticBezierCurveTo(_is_rel, coord_pairs) =>
+            SvgWordKind::SmoothQuadraticBezierCurveTo(ref mut coord_pairs) =>
                 coord_pairs.iter_mut().for_each(|(x, y)| {
                     *x *= s;
                     *y *= s;
                 }),
-            Self::EllipticalArc(_is_rel, arc_args) =>
+            SvgWordKind::EllipticalArc(ref mut arc_args) =>
                 arc_args.iter_mut().for_each(|(rx, ry, _x_rotation, _large_arc, _sweep, (x, y))| {
                     *rx *= s;
                     *ry *= s;
@@ -135,13 +146,6 @@ impl SvgWord {
                      *y *= s;
                 }),
         }
-    }
-}
-
-fn letter_abs_rel(c: char, is_rel: bool) -> char {
-    match is_rel {
-        true => c.to_ascii_lowercase(),
-        false => c.to_ascii_uppercase(),
     }
 }
 
@@ -260,34 +264,40 @@ fn svg_word<O>(input: &str, cmd_letter: char, arg_parser: fn(&str)->IResult<&str
 
 //TODO Could factor some commands together into a factory
 fn move_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (is_rel, args)) = svg_word(input, 'M', coordinate_pair_sequence)?;
-    Ok((input, SvgWord::MoveTo(is_rel, args)))
+    let (input, (is_relative, args)) = svg_word(input, 'M', coordinate_pair_sequence)?;
+    let word = SvgWordKind::MoveTo(args);
+    Ok((input, SvgWord{ is_relative, word}))
 }
 
 fn line_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (is_rel, args)) = svg_word(input, 'L', coordinate_pair_sequence)?;
-    Ok((input, SvgWord::LineTo(is_rel, args)))
+    let (input, (is_relative, args)) = svg_word(input, 'L', coordinate_pair_sequence)?;
+    let word = SvgWordKind::LineTo(args);
+    Ok((input, SvgWord{ is_relative, word}))
 }
 
 fn close_path(input: &str) -> IResult<&str, SvgWord> {
-    let (input, c) = satisfy(|c| c == 'Z' || c == 'z')(input)?;
-    let is_rel = c.is_ascii_lowercase();
-    Ok((input, SvgWord::ClosePath(is_rel)))
+    let (input, c) = satisfy(|c| c.to_ascii_uppercase() == 'Z')(input)?;
+    let is_relative = c.is_ascii_lowercase();
+    let word = SvgWordKind::ClosePath;
+    Ok((input, SvgWord{ is_relative, word}))
 }
 
 fn horizontal_line_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (is_rel, args)) = svg_word(input, 'H', coordinate_sequence)?;
-    Ok((input, SvgWord::HorizontalLineTo(is_rel, args)))
+    let (input, (is_relative, args)) = svg_word(input, 'H', coordinate_sequence)?;
+    let word = SvgWordKind::HorizontalLineTo(args);
+    Ok((input, SvgWord{ is_relative, word}))
 }
 
 fn vertical_line_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (is_rel, args)) = svg_word(input, 'V', coordinate_sequence)?;
-    Ok((input, SvgWord::VerticalLineTo(is_rel, args)))
+    let (input, (is_relative, args)) = svg_word(input, 'V', coordinate_sequence)?;
+    let word = SvgWordKind::VerticalLineTo(args);
+    Ok((input, SvgWord{ is_relative, word}))
 }
 
 fn curve_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (is_rel, args)) = svg_word(input, 'C', curve_to_coordinate_sequence)?;
-    Ok((input, SvgWord::CurveTo(is_rel, args)))
+    let (input, (is_relative, args)) = svg_word(input, 'C', curve_to_coordinate_sequence)?;
+    let word = SvgWordKind::CurveTo(args);
+    Ok((input, SvgWord{ is_relative, word}))
 }
 
 fn curve_to_coordinate_sequence(input: &str) -> IResult<&str, CurveToCoordinateSequence> {
@@ -297,8 +307,9 @@ fn curve_to_coordinate_sequence(input: &str) -> IResult<&str, CurveToCoordinateS
 }
 
 fn smooth_curve_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (is_rel, args)) = svg_word(input, 'S', smooth_curve_to_coordinate_sequence)?;
-    Ok((input, SvgWord::SmoothCurveTo(is_rel, args)))
+    let (input, (is_relative, args)) = svg_word(input, 'S', smooth_curve_to_coordinate_sequence)?;
+    let word = SvgWordKind::SmoothCurveTo(args);
+    Ok((input, SvgWord{ is_relative, word}))
 }
 
 fn smooth_curve_to_coordinate_sequence(input: &str) -> IResult<&str, SmoothCurveToCoordinateSequence> {
@@ -311,8 +322,9 @@ fn smooth_curve_to_coordinate_sequence(input: &str) -> IResult<&str, SmoothCurve
 }
 
 fn quadratic_bezier_curve_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (is_rel, args)) = svg_word(input, 'Q', quadratic_bezier_curve_to_coordinate_sequence)?;
-    Ok((input, SvgWord::QuadraticBezierCurveTo(is_rel, args)))
+    let (input, (is_relative, args)) = svg_word(input, 'Q', quadratic_bezier_curve_to_coordinate_sequence)?;
+    let word = SvgWordKind::QuadraticBezierCurveTo(args);
+    Ok((input, SvgWord{ is_relative, word}))
 }
 
 fn quadratic_bezier_curve_to_coordinate_sequence(input: &str) -> IResult<&str, QuadraticBezierCurveToCoordinateSequence> {
@@ -325,8 +337,9 @@ fn quadratic_bezier_curve_to_coordinate_sequence(input: &str) -> IResult<&str, Q
 }
 
 fn smooth_quadratic_bezier_curve_to(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (is_rel, args)) = svg_word(input, 'T', coordinate_pair_sequence)?;
-    Ok((input, SvgWord::SmoothQuadraticBezierCurveTo(is_rel, args)))
+    let (input, (is_relative, args)) = svg_word(input, 'T', coordinate_pair_sequence)?;
+    let word = SvgWordKind::SmoothQuadraticBezierCurveTo(args);
+    Ok((input, SvgWord{ is_relative, word}))
 }
 
 fn elliptical_arc_argument(input: &str) -> IResult<&str, EllipticalArcArgument> {
@@ -347,8 +360,9 @@ fn elliptical_arc_argument_sequence(input: &str) -> IResult<&str, EllipticalArcA
 }
 
 fn elliptical_arc(input: &str) -> IResult<&str, SvgWord> {
-    let (input, (is_rel, args)) = svg_word(input, 'A', elliptical_arc_argument_sequence)?;
-    Ok((input, SvgWord::EllipticalArc(is_rel, args)))
+    let (input, (is_relative, args)) = svg_word(input, 'A', elliptical_arc_argument_sequence)?;
+    let word = SvgWordKind::EllipticalArc(args);
+    Ok((input, SvgWord{ is_relative, word}))
 }
 
 fn flag(input: &str) -> IResult<&str, bool> {
