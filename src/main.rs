@@ -27,9 +27,44 @@ type EllipticalArcArgumentSequence = Vec<EllipticalArcArgument>;
 type SvgPath = Vec<SvgWord>;
 
 #[derive(Debug)]
+struct BoundingBox {
+    min: CoordinatePair,
+    max: CoordinatePair,
+}
+
+impl BoundingBox {
+    fn merge(&self, bb: BoundingBox) -> BoundingBox {
+        let min_x = self.min.0.min(bb.min.0);
+        let min_y = self.min.1.min(bb.min.1);
+        let max_x = self.max.0.max(bb.max.0);
+        let max_y = self.max.1.max(bb.max.1);
+        BoundingBox {
+            min: (min_x, min_y),
+            max: (max_x, max_y),
+        }
+    }
+}
+
+impl From<CoordinatePair> for BoundingBox {
+    fn from(p: CoordinatePair) -> Self {
+        BoundingBox { min: p, max: p }
+    }
+}
+impl From<CoordinatePairDouble> for BoundingBox {
+    fn from(l: CoordinatePairDouble) -> Self {
+        BoundingBox::from(l.0).merge(l.1.into())
+    }
+}
+
+#[derive(Debug)]
+enum SvgWordEndpoint {
+    CoordinatePair(CoordinatePair),
+    StartOfPath,
+}
+
+#[derive(Debug)]
 enum SvgWordKind {
     MoveTo(CoordinatePairSequence),
-    ClosePath,
     LineTo(CoordinatePairSequence),
     HorizontalLineTo(CoordinateSequence),
     VerticalLineTo(CoordinateSequence),
@@ -38,6 +73,7 @@ enum SvgWordKind {
     QuadraticBezierCurveTo(QuadraticBezierCurveToCoordinateSequence),
     SmoothQuadraticBezierCurveTo(CoordinatePairSequence),
     EllipticalArc(EllipticalArcArgumentSequence),
+    ClosePath,
 }
 
 struct SvgWord {
@@ -55,7 +91,6 @@ impl SvgWord {
     fn command_char_abs(&self) -> char {
         match self.word {
             SvgWordKind::MoveTo(_) => 'M',
-            SvgWordKind::ClosePath => 'Z',
             SvgWordKind::LineTo(_) => 'L',
             SvgWordKind::HorizontalLineTo(_) => 'H',
             SvgWordKind::VerticalLineTo(_) => 'V',
@@ -64,6 +99,7 @@ impl SvgWord {
             SvgWordKind::QuadraticBezierCurveTo(_) => 'Q',
             SvgWordKind::SmoothQuadraticBezierCurveTo(_) => 'T',
             SvgWordKind::EllipticalArc(_) => 'A',
+            SvgWordKind::ClosePath => 'Z',
         }
     }
     fn command_char_rel(&self) -> char {
@@ -78,7 +114,6 @@ impl SvgWord {
     fn command_args_string(&self) -> String {
         match &self.word {
             SvgWordKind::MoveTo(coord_pairs) => CoordinatePairSequenceStruct(&coord_pairs).to_string(),
-            SvgWordKind::ClosePath => "".to_string(),
             SvgWordKind::LineTo(coord_pairs) => CoordinatePairSequenceStruct(&coord_pairs).to_string(),
             SvgWordKind::HorizontalLineTo(coords) => CoordinateSequenceStruct(&coords).to_string(),
             SvgWordKind::VerticalLineTo(coords) => CoordinateSequenceStruct(&coords).to_string(),
@@ -87,6 +122,121 @@ impl SvgWord {
             SvgWordKind::QuadraticBezierCurveTo(coord_doubles) => CoordinatePairDoubleSequenceStruct(&coord_doubles).to_string(),
             SvgWordKind::SmoothQuadraticBezierCurveTo(coord_pairs) => CoordinatePairSequenceStruct(&coord_pairs).to_string(),
             SvgWordKind::EllipticalArc(arc_args) => EllipticalArcArgumentSequenceStuct(&arc_args).to_string(),
+            SvgWordKind::ClosePath => "".to_string(),
+        }
+    }
+    fn bounding_box(&self, start: CoordinatePair) -> BoundingBox {
+        let init_bb = BoundingBox{ min: start, max: start };
+        match &self.word {
+            SvgWordKind::MoveTo(coord_pairs) => {
+                coord_pairs.iter().fold(
+                    (init_bb, start),
+                    |(acc_bb, current_position), point| {
+                        let maybe_offset_point = self.maybe_offset(point, current_position);
+                        (acc_bb.merge(maybe_offset_point.into()), maybe_offset_point)
+                    }
+                ).0
+            },
+            SvgWordKind::LineTo(coord_pairs) => {
+                coord_pairs.iter().fold(
+                    (init_bb, start),
+                    |(acc_bb, current_position), point| {
+                        let maybe_offset_point = self.maybe_offset(point, current_position);
+                        (acc_bb.merge(maybe_offset_point.into()), maybe_offset_point)
+                    }
+                ).0
+            },
+            SvgWordKind::HorizontalLineTo(coords) =>
+                coords.iter().fold(
+                    (init_bb, start),
+                    |(acc_bb, current_position), x|
+                    (
+                        acc_bb.merge(
+                            BoundingBox::from(
+                                self.maybe_offset(
+                                    &(*x, start.1),
+                                    current_position
+                                )
+                            )
+                        ),
+                        (*x, start.1)
+                    )
+                ).0,
+            SvgWordKind::VerticalLineTo(coords) =>
+                coords.iter().fold(
+                    (init_bb, start),
+                    |(acc_bb, current_position), y|
+                    (
+                        acc_bb.merge(
+                            BoundingBox::from(
+                                self.maybe_offset(
+                                    &(start.0, *y),
+                                    current_position
+                                )
+                            )
+                        ),
+                        (start.0, *y)
+                    )
+                ).0,
+            SvgWordKind::CurveTo(_coord_triplets) => todo!(),
+            SvgWordKind::SmoothCurveTo(_coord_doubles) => todo!(),
+            SvgWordKind::QuadraticBezierCurveTo(_coord_doubles) => todo!(),
+            SvgWordKind::SmoothQuadraticBezierCurveTo(_coord_pairs) => todo!(),
+            SvgWordKind::EllipticalArc(_arc_args) => todo!(),
+            SvgWordKind::ClosePath => {
+                //TODO: Re-evaluate, should we somehow try to include the start of the path? It
+                //shouldn't change the bounding box.
+                start.into()
+            },
+        }
+    }
+
+    fn maybe_offset(&self, point: &CoordinatePair, current_position: CoordinatePair) -> CoordinatePair {
+        match self.is_relative {
+            true => (current_position.0 + point.0, current_position.1 + point.1),
+            false => *point,
+        }
+    }
+    fn endpoint(&self, start: CoordinatePair) -> SvgWordEndpoint {
+        match &self.word {
+            SvgWordKind::MoveTo(coord_pairs) => {
+                SvgWordEndpoint::CoordinatePair(
+                    match self.is_relative {
+                        true => coord_pairs.iter().fold(start, |acc, point| (acc.0+point.0,acc.1+point.1)),
+                        false => *coord_pairs.iter().last().unwrap_or(&start),
+                    }
+                )
+            },
+            SvgWordKind::LineTo(coord_pairs) => {
+                SvgWordEndpoint::CoordinatePair(
+                    match self.is_relative {
+                        true => coord_pairs.iter().fold(start, |acc, point| (acc.0+point.0,acc.1+point.1)),
+                        false => *coord_pairs.iter().last().unwrap_or(&start),
+                    }
+                )
+            },
+            SvgWordKind::HorizontalLineTo(coords) => {
+                SvgWordEndpoint::CoordinatePair(
+                    match self.is_relative {
+                        true => coords.iter().fold(start, |acc, x| (acc.0+x, start.1)),
+                        false => (*coords.iter().last().unwrap_or(&start.0), start.1),
+                    }
+                )
+            },
+            SvgWordKind::VerticalLineTo(coords) => {
+                SvgWordEndpoint::CoordinatePair(
+                    match self.is_relative {
+                        true => coords.iter().fold(start, |acc, y| (start.0, acc.1+y)),
+                        false => (start.0, *coords.iter().last().unwrap_or(&start.1)),
+                    }
+                )
+            },
+            SvgWordKind::CurveTo(_coord_triplets) => todo!(),
+            SvgWordKind::SmoothCurveTo(_coord_doubles) => todo!(),
+            SvgWordKind::QuadraticBezierCurveTo(_coord_doubles) => todo!(),
+            SvgWordKind::SmoothQuadraticBezierCurveTo(_coord_pairs) => todo!(),
+            SvgWordKind::EllipticalArc(_arc_args) => todo!(),
+            SvgWordKind::ClosePath => SvgWordEndpoint::StartOfPath,
         }
     }
 }
@@ -100,7 +250,6 @@ impl SvgWord {
                     *x *= s;
                     *y *= s;
                 }),
-            SvgWordKind::ClosePath => {},
             SvgWordKind::LineTo(ref mut coord_pairs) =>
                 coord_pairs.iter_mut().for_each(|(x, y)| {
                     *x *= s;
@@ -145,6 +294,7 @@ impl SvgWord {
                      *x *= s;
                      *y *= s;
                 }),
+            SvgWordKind::ClosePath => {},
         }
     }
 }
@@ -165,6 +315,27 @@ impl SvgPathStruct<'_> {
         for word in self.0.iter_mut() {
             word.scale(s);
         }
+    }
+    fn bounding_box(&self, start: CoordinatePair) -> BoundingBox {
+        let init_bb = BoundingBox{ min: start, max: start };
+        self.0.iter().fold((init_bb, start), |(acc_bb, current_position), word| {
+            let acc = acc_bb.merge(word.bounding_box(current_position));
+            let word_endpoint = word.endpoint(current_position);
+            let endpoint = match word_endpoint {
+                SvgWordEndpoint::CoordinatePair(cp) => cp,
+                SvgWordEndpoint::StartOfPath => start,
+            };
+            (acc, endpoint)
+        }).0
+    }
+    fn endpoint(&self, start: CoordinatePair) -> CoordinatePair {
+        self.0.iter().fold(start, |acc, word| {
+            let word_endpoint = word.endpoint(acc);
+            match word_endpoint {
+                SvgWordEndpoint::CoordinatePair(cp) => cp,
+                SvgWordEndpoint::StartOfPath => start,
+            }
+        })
     }
 }
 
@@ -275,13 +446,6 @@ fn line_to(input: &str) -> IResult<&str, SvgWord> {
     Ok((input, SvgWord{ is_relative, word}))
 }
 
-fn close_path(input: &str) -> IResult<&str, SvgWord> {
-    let (input, c) = satisfy(|c| c.to_ascii_uppercase() == 'Z')(input)?;
-    let is_relative = c.is_ascii_lowercase();
-    let word = SvgWordKind::ClosePath;
-    Ok((input, SvgWord{ is_relative, word}))
-}
-
 fn horizontal_line_to(input: &str) -> IResult<&str, SvgWord> {
     let (input, (is_relative, args)) = svg_word(input, 'H', coordinate_sequence)?;
     let word = SvgWordKind::HorizontalLineTo(args);
@@ -376,6 +540,14 @@ fn flag(input: &str) -> IResult<&str, bool> {
     Ok((input, value))
 }
 
+fn close_path(input: &str) -> IResult<&str, SvgWord> {
+    let (input, c) = satisfy(|c| c.to_ascii_uppercase() == 'Z')(input)?;
+    let is_relative = c.is_ascii_lowercase();
+    let word = SvgWordKind::ClosePath;
+    Ok((input, SvgWord{ is_relative, word}))
+}
+
+
 fn coordinate_pair_double(input: &str) -> IResult<&str, CoordinatePairDouble> {
     tuple((
         coordinate_pair,
@@ -453,7 +625,8 @@ fn is_flag(c: char) -> bool {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let path = "M -23.69,-49.89 C -38.31,-49.89 -49.89,-37.14 -49.89,-21.57 C -49.89,10.32 -20.2,18.56 -0.1065,50 C 19.11,18.8 49.9,9.144 49.9,-21.57 C 49.9,-37.14 38.1,-49.89 23.69,-49.89 C 13.21,-49.89 4.044,-43.28 -0.1065,-33.6 C -4.256,-43.28 -13.21,-49.89 -23.69,-49.89 Z";
+    //let path = "M -23.69,-49.89 C -38.31,-49.89 -49.89,-37.14 -49.89,-21.57 C -49.89,10.32 -20.2,18.56 -0.1065,50 C 19.11,18.8 49.9,9.144 49.9,-21.57 C 49.9,-37.14 38.1,-49.89 23.69,-49.89 C 13.21,-49.89 4.044,-43.28 -0.1065,-33.6 C -4.256,-43.28 -13.21,-49.89 -23.69,-49.89 Z";
+    let path = "M10,0 10,10L10,20 20,-15 -10, -10";
     println!("Original path:\n\t{path}");
 
 
@@ -462,6 +635,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     path.scale(2.0);
 
     println!("As new path:\n\t{}", path);
+
+    let bb = path.bounding_box((0.0, 0.0));
+    println!("bb:\n\t{:?}", bb);
 
     Ok(())
 

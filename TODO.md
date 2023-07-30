@@ -1,3 +1,15 @@
+
+The implicit starting point, and relative positioning positibility mean
+  any bounds checks require the whole path
+  or an accompanying starting position for each word
+
+  Maybe this is simply a parameter to the bounding_box method
+    Supplied as needed, including while running through a loop
+
+
+
+
+
 Define Vec types so that I can call scale on them?
 
 Need to center path before scaling, then move back
