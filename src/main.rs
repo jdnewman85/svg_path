@@ -11,8 +11,10 @@ use nom::number::complete::float;
 use nom::sequence::{separated_pair, terminated, preceded};
 use nom::{IResult, character::complete::{char, satisfy}, sequence::tuple};
 
+use glam::Vec2;
+
 type Number = f32;
-type CoordinatePair = (Number, Number);
+type CoordinatePair = Vec2;
 type CoordinateSequence = Vec<Number>;
 type CoordinatePairSequence = Vec<CoordinatePair>;
 type CoordinatePairDouble = (CoordinatePair, CoordinatePair);
@@ -34,13 +36,13 @@ struct BoundingBox {
 
 impl BoundingBox {
     fn merge(&self, bb: BoundingBox) -> BoundingBox {
-        let min_x = self.min.0.min(bb.min.0);
-        let min_y = self.min.1.min(bb.min.1);
-        let max_x = self.max.0.max(bb.max.0);
-        let max_y = self.max.1.max(bb.max.1);
+        let min_x = self.min.x.min(bb.min.x);
+        let min_y = self.min.y.min(bb.min.y);
+        let max_x = self.max.x.max(bb.max.x);
+        let max_y = self.max.y.max(bb.max.y);
         BoundingBox {
-            min: (min_x, min_y),
-            max: (max_x, max_y),
+            min: (min_x, min_y).into(),
+            max: (max_x, max_y).into(),
         }
     }
 }
@@ -68,11 +70,11 @@ enum SvgWordKind {
     LineTo(CoordinatePairSequence),
     HorizontalLineTo(CoordinateSequence),
     VerticalLineTo(CoordinateSequence),
-    CurveTo(CurveToCoordinateSequence),
+    CurveTo(CurveToCoordinateSequence), //cubic Bezier
     SmoothCurveTo(SmoothCurveToCoordinateSequence),
-    QuadraticBezierCurveTo(QuadraticBezierCurveToCoordinateSequence),
+    QuadraticBezierCurveTo(QuadraticBezierCurveToCoordinateSequence), //quad bezier
     SmoothQuadraticBezierCurveTo(CoordinatePairSequence),
-    EllipticalArc(EllipticalArcArgumentSequence),
+    EllipticalArc(EllipticalArcArgumentSequence), //
     ClosePath,
 }
 
@@ -154,12 +156,12 @@ impl SvgWord {
                         acc_bb.merge(
                             BoundingBox::from(
                                 self.maybe_offset(
-                                    &(*x, start.1),
+                                    &(*x, start.y).into(),
                                     current_position
                                 )
                             )
                         ),
-                        (*x, start.1)
+                        (*x, start.y).into()
                     )
                 ).0,
             SvgWordKind::VerticalLineTo(coords) =>
@@ -170,12 +172,12 @@ impl SvgWord {
                         acc_bb.merge(
                             BoundingBox::from(
                                 self.maybe_offset(
-                                    &(start.0, *y),
+                                    &(start.x, *y).into(),
                                     current_position
                                 )
                             )
                         ),
-                        (start.0, *y)
+                        (start.x, *y).into()
                     )
                 ).0,
             SvgWordKind::CurveTo(_coord_triplets) => todo!(),
@@ -193,7 +195,8 @@ impl SvgWord {
 
     fn maybe_offset(&self, point: &CoordinatePair, current_position: CoordinatePair) -> CoordinatePair {
         match self.is_relative {
-            true => (current_position.0 + point.0, current_position.1 + point.1),
+//            true => (current_position.x + point.x, current_position.y + point.y).into(),
+            true => current_position+*point,
             false => *point,
         }
     }
@@ -202,7 +205,7 @@ impl SvgWord {
             SvgWordKind::MoveTo(coord_pairs) => {
                 SvgWordEndpoint::CoordinatePair(
                     match self.is_relative {
-                        true => coord_pairs.iter().fold(start, |acc, point| (acc.0+point.0,acc.1+point.1)),
+                        true => coord_pairs.iter().fold(start, |acc, point| acc+ *point),
                         false => *coord_pairs.iter().last().unwrap_or(&start),
                     }
                 )
@@ -210,7 +213,7 @@ impl SvgWord {
             SvgWordKind::LineTo(coord_pairs) => {
                 SvgWordEndpoint::CoordinatePair(
                     match self.is_relative {
-                        true => coord_pairs.iter().fold(start, |acc, point| (acc.0+point.0,acc.1+point.1)),
+                        true => coord_pairs.iter().fold(start, |acc, point| acc+ *point),
                         false => *coord_pairs.iter().last().unwrap_or(&start),
                     }
                 )
@@ -218,16 +221,16 @@ impl SvgWord {
             SvgWordKind::HorizontalLineTo(coords) => {
                 SvgWordEndpoint::CoordinatePair(
                     match self.is_relative {
-                        true => coords.iter().fold(start, |acc, x| (acc.0+x, start.1)),
-                        false => (*coords.iter().last().unwrap_or(&start.0), start.1),
+                        true => coords.iter().fold(start, |acc, x| (acc.x+x, start.y).into()),
+                        false => (*coords.iter().last().unwrap_or(&start.x), start.y).into(),
                     }
                 )
             },
             SvgWordKind::VerticalLineTo(coords) => {
                 SvgWordEndpoint::CoordinatePair(
                     match self.is_relative {
-                        true => coords.iter().fold(start, |acc, y| (start.0, acc.1+y)),
-                        false => (start.0, *coords.iter().last().unwrap_or(&start.1)),
+                        true => coords.iter().fold(start, |acc, y| (start.x, acc.y+y).into()),
+                        false => (start.x, *coords.iter().last().unwrap_or(&start.y)).into(),
                     }
                 )
             },
@@ -246,53 +249,44 @@ impl SvgWord {
     fn scale(&mut self, s: f32) {
         match &mut self.word {
             SvgWordKind::MoveTo(ref mut coord_pairs) =>
-                coord_pairs.iter_mut().for_each(|(x, y)| {
-                    *x *= s;
-                    *y *= s;
+                coord_pairs.iter_mut().for_each(|coord_pair| {
+                    coord_pair.x *= s;
+                    coord_pair.y *= s;
                 }),
             SvgWordKind::LineTo(ref mut coord_pairs) =>
-                coord_pairs.iter_mut().for_each(|(x, y)| {
-                    *x *= s;
-                    *y *= s;
+                coord_pairs.iter_mut().for_each(|coord_pair| {
+                    coord_pair.x *= s;
+                    coord_pair.y *= s;
                 }),
             SvgWordKind::HorizontalLineTo(ref mut coords) =>
                 coords.iter_mut().for_each(|x| *x *= s),
             SvgWordKind::VerticalLineTo(ref mut coords) =>
                 coords.iter_mut().for_each(|y| *y *= s),
             SvgWordKind::CurveTo(ref mut coord_triplets) =>
-                coord_triplets.iter_mut().for_each(|((x1, y1), (x2, y2), (x, y))| {
-                    *x1 *= s;
-                    *y1 *= s;
-                    *x2 *= s;
-                    *y2 *= s;
-                     *x *= s;
-                     *y *= s;
+                coord_triplets.iter_mut().for_each(|(c1, c2, end)| {
+                    *c1 *= s;
+                    *c2 *= s;
+                    *end *= s;
                 }),
             SvgWordKind::SmoothCurveTo(ref mut coord_doubles) =>
-                coord_doubles.iter_mut().for_each(|((x2, y2), (x, y))| {
-                    *x2 *= s;
-                    *y2 *= s;
-                     *x *= s;
-                     *y *= s;
+                coord_doubles.iter_mut().for_each(|(c1, end)| {
+                    *c1 *= s;
+                    *end *= s;
                 }),
             SvgWordKind::QuadraticBezierCurveTo(ref mut coord_doubles) =>
-                coord_doubles.iter_mut().for_each(|((x1, y1), (x, y))| {
-                    *x1 *= s;
-                    *y1 *= s;
-                     *x *= s;
-                     *y *= s;
+                coord_doubles.iter_mut().for_each(|(c1, end)| {
+                    *c1 *= s;
+                    *end *= s;
                 }),
             SvgWordKind::SmoothQuadraticBezierCurveTo(ref mut coord_pairs) =>
-                coord_pairs.iter_mut().for_each(|(x, y)| {
-                    *x *= s;
-                    *y *= s;
+                coord_pairs.iter_mut().for_each(|end| {
+                    *end *= s;
                 }),
             SvgWordKind::EllipticalArc(ref mut arc_args) =>
-                arc_args.iter_mut().for_each(|(rx, ry, _x_rotation, _large_arc, _sweep, (x, y))| {
+                arc_args.iter_mut().for_each(|(rx, ry, _x_rotation, _large_arc, _sweep, end)| {
                     *rx *= s;
                     *ry *= s;
-                     *x *= s;
-                     *y *= s;
+                     *end *= s;
                 }),
             SvgWordKind::ClosePath => {},
         }
@@ -344,7 +338,7 @@ impl Display for CoordinatePairSequenceStruct<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}",
             self.0.iter()
-                .map(|(x, y)| format!("{x},{y}"))
+                .map(|v| format!("{},{}", v.x, v.y))
                 .collect::<Vec<_>>().join(" ")
         )
     }
@@ -366,7 +360,7 @@ impl Display for CurveToCoordinateSequenceStruct<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}",
             self.0.iter()
-                .map(|((x1, y1), (x2, y2), (x, y))| format!("{x1},{y1} {x2},{y2} {x},{y}"))
+                .map(|(c1, c2, end)| format!("{},{} {},{} {},{}", c1.x, c1.y, c2.x, c2.y, end.x, end.y))
                 .collect::<Vec<_>>().join(" ")
         )
     }
@@ -377,7 +371,7 @@ impl Display for CoordinatePairDoubleSequenceStruct<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}",
             self.0.iter()
-                .map(|((x1, y1), (x, y))| format!("{x1},{y1} {x},{y}"))
+                .map(|(c1, end)| format!("{},{} {},{}", c1.x, c1.y, end.x, end.y))
                 .collect::<Vec<_>>().join(" ")
         )
     }
@@ -388,9 +382,10 @@ impl Display for EllipticalArcArgumentSequenceStuct<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}",
             self.0.iter()
-                .map(|(rx, ry, x_rotation, large_arc, sweep, (x, y))| {
+                .map(|(rx, ry, x_rotation, large_arc, sweep, end)| {
                     let large_arc = *large_arc as i32;
                     let sweep = *sweep as i32;
+                    let (x, y) = (end.x, end.y);
                     format!("{rx},{ry} {x_rotation} {large_arc} {sweep} {x},{y}")
                 })
                 .collect::<Vec<_>>().join(" ")
@@ -585,11 +580,12 @@ fn coordinate_sequence(input: &str) -> IResult<&str, CoordinateSequence> {
 }
 
 fn coordinate_pair(input: &str) -> IResult<&str, CoordinatePair> {
-    separated_pair(
+    let (input, coord_pair) = separated_pair(
         coordinate,
         opt(comma_wsp),
         coordinate,
-    )(input)
+    )(input)?;
+    Ok((input, coord_pair.into()))
 }
 
 fn coordinate(input: &str) -> IResult<&str, Number> {
@@ -636,7 +632,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("As new path:\n\t{}", path);
 
-    let bb = path.bounding_box((0.0, 0.0));
+    let bb = path.bounding_box((0.0, 0.0).into());
     println!("bb:\n\t{:?}", bb);
 
     Ok(())
