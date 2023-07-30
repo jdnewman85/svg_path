@@ -200,12 +200,13 @@ impl SvgWord {
             false => *point,
         }
     }
+    //TODO DRY?
     fn endpoint(&self, start: CoordinatePair) -> SvgWordEndpoint {
         match &self.word {
             SvgWordKind::MoveTo(coord_pairs) => {
                 SvgWordEndpoint::CoordinatePair(
                     match self.is_relative {
-                        true => coord_pairs.iter().fold(start, |acc, point| acc+ *point),
+                        true => coord_pairs.iter().fold(start, |acc, point| acc + *point),
                         false => *coord_pairs.iter().last().unwrap_or(&start),
                     }
                 )
@@ -213,7 +214,7 @@ impl SvgWord {
             SvgWordKind::LineTo(coord_pairs) => {
                 SvgWordEndpoint::CoordinatePair(
                     match self.is_relative {
-                        true => coord_pairs.iter().fold(start, |acc, point| acc+ *point),
+                        true => coord_pairs.iter().fold(start, |acc, point| acc + *point),
                         false => *coord_pairs.iter().last().unwrap_or(&start),
                     }
                 )
@@ -234,11 +235,70 @@ impl SvgWord {
                     }
                 )
             },
-            SvgWordKind::CurveTo(_coord_triplets) => todo!(),
-            SvgWordKind::SmoothCurveTo(_coord_doubles) => todo!(),
-            SvgWordKind::QuadraticBezierCurveTo(_coord_doubles) => todo!(),
-            SvgWordKind::SmoothQuadraticBezierCurveTo(_coord_pairs) => todo!(),
-            SvgWordKind::EllipticalArc(_arc_args) => todo!(),
+            SvgWordKind::CurveTo(coord_triplets) => {
+                SvgWordEndpoint::CoordinatePair(
+                    match self.is_relative {
+                        true => coord_triplets.iter().map(|coord_triplet| coord_triplet.2).fold(start, |acc, point| acc+point),
+                        false => {
+                            let last_triplet = coord_triplets.iter().last();
+                            match last_triplet {
+                                Some((_, _, end)) => *end,
+                                None => start,
+                            }
+                        },
+                    }
+                )
+            },
+            SvgWordKind::SmoothCurveTo(coord_doubles) => {
+                SvgWordEndpoint::CoordinatePair(
+                    match self.is_relative {
+                        true => coord_doubles.iter().map(|coord_double| coord_double.1).fold(start, |acc, point| acc+point),
+                        false => {
+                            let last_double = coord_doubles.iter().last();
+                            match last_double {
+                                Some((_, end)) => *end,
+                                None => start,
+                            }
+                        },
+                    }
+                )
+            },
+            SvgWordKind::QuadraticBezierCurveTo(coord_doubles) => {
+                SvgWordEndpoint::CoordinatePair(
+                    match self.is_relative {
+                        true => coord_doubles.iter().map(|coord_double| coord_double.1).fold(start, |acc, point| acc+point),
+                        false => {
+                            let last_double = coord_doubles.iter().last();
+                            match last_double {
+                                Some((_, end)) => *end,
+                                None => start,
+                            }
+                        },
+                    }
+                )
+            },
+            SvgWordKind::SmoothQuadraticBezierCurveTo(coord_pairs) => {
+                SvgWordEndpoint::CoordinatePair(
+                    match self.is_relative {
+                        true => coord_pairs.iter().fold(start, |acc, point| acc + *point),
+                        false => *coord_pairs.iter().last().unwrap_or(&start),
+                    }
+                )
+            },
+            SvgWordKind::EllipticalArc(arc_args) => {
+                SvgWordEndpoint::CoordinatePair(
+                    match self.is_relative {
+                        true => arc_args.iter().map(|arc_arg| arc_arg.5).fold(start, |acc, point| acc+point),
+                        false => {
+                            let last_args = arc_args.iter().last();
+                            match last_args {
+                                Some((_, _, _, _, _, end)) => *end,
+                                None => start,
+                            }
+                        },
+                    }
+                )
+            },
             SvgWordKind::ClosePath => SvgWordEndpoint::StartOfPath,
         }
     }
